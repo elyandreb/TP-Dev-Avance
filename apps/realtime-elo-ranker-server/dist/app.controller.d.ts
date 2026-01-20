@@ -1,4 +1,6 @@
+import { MessageEvent } from '@nestjs/common';
 import * as appService_1 from './app.service';
+import { Observable } from 'rxjs';
 declare class CreatePlayerDto {
     id: string;
 }
@@ -16,5 +18,6 @@ export declare class AppController {
         winner: appService_1.Player;
         loser: appService_1.Player;
     };
+    rankingEvents(): Observable<MessageEvent>;
 }
 export {};

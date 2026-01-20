@@ -8,11 +8,16 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppService = void 0;
 const common_1 = require("@nestjs/common");
+const rxjs_1 = require("rxjs");
 let AppService = class AppService {
     players = [];
     matches = [];
+    rankingEvents$ = new rxjs_1.Subject();
     DEFAULT_INITIAL_RANK = 1200;
     K_FACTOR = 32;
+    getRankingUpdates() {
+        return this.rankingEvents$.asObservable();
+    }
     getAllPlayers() {
         return [...this.players].sort((a, b) => b.rank - a.rank);
     }
@@ -38,16 +43,16 @@ let AppService = class AppService {
         const scoreLoser = isDraw ? 0.5 : 0;
         const expectedWinner = this.calculateExpectedScore(winner.rank, loser.rank);
         const expectedLoser = this.calculateExpectedScore(loser.rank, winner.rank);
-        const newRankWinner = winner.rank + this.K_FACTOR * (scoreWinner - expectedWinner);
-        const newRankLoser = loser.rank + this.K_FACTOR * (scoreLoser - expectedLoser);
-        winner.rank = Math.round(newRankWinner);
-        loser.rank = Math.round(newRankLoser);
+        winner.rank = Math.round(winner.rank + this.K_FACTOR * (scoreWinner - expectedWinner));
+        loser.rank = Math.round(loser.rank + this.K_FACTOR * (scoreLoser - expectedLoser));
         this.matches.push({
             winnerId,
             loserId,
             isDraw,
             date: new Date(),
         });
+        this.rankingEvents$.next(winner);
+        this.rankingEvents$.next(loser);
         return { winner, loser };
     }
     calculateExpectedScore(ratingA, ratingB) {

@@ -48,6 +48,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppController = void 0;
 const common_1 = require("@nestjs/common");
 const appService_1 = __importStar(require("./app.service"));
+const rxjs_1 = require("rxjs");
+const operators_1 = require("rxjs/operators");
 class CreatePlayerDto {
     id;
 }
@@ -74,6 +76,14 @@ let AppController = class AppController {
     createMatch(body) {
         return this.appService.processMatch(body.winner, body.loser, body.draw);
     }
+    rankingEvents() {
+        return this.appService.getRankingUpdates().pipe((0, operators_1.map)((player) => ({
+            data: {
+                type: 'RankingUpdate',
+                player: player,
+            },
+        })));
+    }
 };
 exports.AppController = AppController;
 __decorate([
@@ -97,6 +107,12 @@ __decorate([
     __metadata("design:paramtypes", [CreateMatchDto]),
     __metadata("design:returntype", void 0)
 ], AppController.prototype, "createMatch", null);
+__decorate([
+    (0, common_1.Sse)('ranking/events'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", rxjs_1.Observable)
+], AppController.prototype, "rankingEvents", null);
 exports.AppController = AppController = __decorate([
     (0, common_1.Controller)('api'),
     __metadata("design:paramtypes", [appService_1.AppService])

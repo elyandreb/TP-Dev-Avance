@@ -11,8 +11,10 @@ export interface MatchResult {
 export declare class AppService {
     private players;
     private matches;
+    private rankingEvents$;
     private readonly DEFAULT_INITIAL_RANK;
     private readonly K_FACTOR;
+    getRankingUpdates(): import("rxjs").Observable<Player>;
     getAllPlayers(): Player[];
     getPlayer(id: string): Player | undefined;
     createPlayer(id: string): Player;

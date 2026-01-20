@@ -3,12 +3,19 @@ import {
   Injectable,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { Subject } from 'rxjs';
 
+/**
+ * Représente un joueur avec son identifiant et son classement Elo actuel.
+ */
 export interface Player {
   id: string;
   rank: number;
 }
 
+/**
+ * Représente le résultat archivé d'un match.
+ */
 export interface MatchResult {
   winnerId: string;
   loserId: string;
@@ -16,30 +23,61 @@ export interface MatchResult {
   date: Date;
 }
 
+/**
+ * Service principal gérant la logique métier du classement Elo.
+ * Stocke les données en mémoire et gère les mises à jour en temps réel.
+ */
 @Injectable()
 export class AppService {
   private players: Player[] = [];
   private matches: MatchResult[] = [];
 
+  /** * Subject RxJS permettant d'émettre des événements de mise à jour de classement.
+   * Agit comme un bus d'événements interne.
+   */
+  private rankingEvents$ = new Subject<Player>();
+
+  /** Classement par défaut attribué au tout premier joueur */
   private readonly DEFAULT_INITIAL_RANK = 1200;
-  private readonly K_FACTOR = 32; // Coefficient de pondération
+
+  /** * Facteur K (Coefficient de développement).
+   * Détermine la vitesse à laquelle le classement change.
+   * K=32 est une valeur standard pour les débutants/systèmes simples.
+   */
+  private readonly K_FACTOR = 32;
 
   /**
-   * Récupère tous les joueurs triés par rang (du meilleur au moins bon)
+   * Retourne un Observable émettant les joueurs dont le classement vient de changer.
+   * Utilisé par le contrôleur pour le flux SSE (Server-Sent Events).
+   * @returns {Observable<Player>} Un flux d'objets Player mis à jour.
+   */
+  getRankingUpdates() {
+    return this.rankingEvents$.asObservable();
+  }
+
+  /**
+   * Récupère la liste complète des joueurs.
+   * @returns {Player[]} La liste des joueurs triée par classement décroissant.
    */
   getAllPlayers(): Player[] {
     return [...this.players].sort((a, b) => b.rank - a.rank);
   }
 
   /**
-   * Trouve un joueur par son ID
+   * Recherche un joueur par son identifiant.
+   * @param {string} id - L'identifiant du joueur à trouver.
+   * @returns {Player | undefined} Le joueur trouvé ou undefined.
    */
   getPlayer(id: string): Player | undefined {
     return this.players.find((p) => p.id === id);
   }
 
   /**
-   * Crée un nouveau joueur
+   * Crée un nouveau joueur.
+   * Le classement initial est calculé sur la moyenne des joueurs existants.
+   * * @param {string} id - L'identifiant du nouveau joueur.
+   * @throws {ConflictException} Si un joueur avec cet ID existe déjà.
+   * @returns {Player} Le joueur nouvellement créé.
    */
   createPlayer(id: string): Player {
     if (this.getPlayer(id)) {
@@ -54,7 +92,13 @@ export class AppService {
   }
 
   /**
-   * Traite un match, met à jour les classements et sauvegarde l'historique
+   * Traite un match terminé, met à jour les classements Elo et notifie les abonnés.
+   * * Formule de mise à jour : Rn = Ro + K * (W - We)
+   * * @param {string} winnerId - L'ID du vainqueur (ou joueur 1 si match nul).
+   * @param {string} loserId - L'ID du perdant (ou joueur 2 si match nul).
+   * @param {boolean} isDraw - Indique si le match est nul (égalité).
+   * @throws {UnprocessableEntityException} Si l'un des joueurs n'existe pas.
+   * @returns {{ winner: Player; loser: Player }} Les deux joueurs avec leurs nouveaux classements.
    */
   processMatch(
     winnerId: string,
@@ -70,26 +114,23 @@ export class AppService {
       );
     }
 
-    // Définition des scores réels (W)
-    // Si match nul, les deux ont 0.5. Sinon vainqueur = 1, perdant = 0
+    // Score réel (W) : 1 pour victoire, 0 pour défaite, 0.5 pour nul
     const scoreWinner = isDraw ? 0.5 : 1;
     const scoreLoser = isDraw ? 0.5 : 0;
 
-    // Calcul des probabilités de victoire (We)
+    // Espérance de victoire (We)
     const expectedWinner = this.calculateExpectedScore(winner.rank, loser.rank);
     const expectedLoser = this.calculateExpectedScore(loser.rank, winner.rank);
 
-    // Mise à jour des rangs (Rn = Ro + K * (W - We))
-    const newRankWinner =
-      winner.rank + this.K_FACTOR * (scoreWinner - expectedWinner);
-    const newRankLoser =
-      loser.rank + this.K_FACTOR * (scoreLoser - expectedLoser);
+    // Calcul des nouveaux rangs
+    winner.rank = Math.round(
+      winner.rank + this.K_FACTOR * (scoreWinner - expectedWinner),
+    );
+    loser.rank = Math.round(
+      loser.rank + this.K_FACTOR * (scoreLoser - expectedLoser),
+    );
 
-    // Application de l'arrondi et mise à jour des objets
-    winner.rank = Math.round(newRankWinner);
-    loser.rank = Math.round(newRankLoser);
-
-    // Sauvegarde du match
+    // Archivage
     this.matches.push({
       winnerId,
       loserId,
@@ -97,19 +138,27 @@ export class AppService {
       date: new Date(),
     });
 
+    // Émission des événements pour le temps réel
+    this.rankingEvents$.next(winner);
+    this.rankingEvents$.next(loser);
+
     return { winner, loser };
   }
 
   /**
-   * Calcule l'espérance de victoire (We) pour le joueur A contre le joueur B.
+   * Calcule l'espérance de victoire (We) du joueur A contre le joueur B.
    * Formule : 1 / (1 + 10^((Rb - Ra) / 400))
+   * * @param {number} ratingA - Classement du joueur A.
+   * @param {number} ratingB - Classement du joueur B.
+   * @returns {number} Probabilité de victoire (entre 0 et 1).
    */
   private calculateExpectedScore(ratingA: number, ratingB: number): number {
     return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
   }
 
   /**
-   * Calcule le rang initial (Moyenne ou 1200)
+   * Calcule le classement initial pour un nouveau joueur.
+   * @returns {number} La moyenne des classements actuels ou 1200 par défaut.
    */
   private calculateInitialRank(): number {
     if (this.players.length === 0) {
