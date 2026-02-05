@@ -200,21 +200,40 @@ describe('Realtime ELO Ranker API (e2e)', () => {
   });
 
   describe('/api/ranking/events (SSE)', () => {
-    it('should return SSE stream with correct headers', async () => {
+    it('should return SSE stream with correct headers', (done) => {
       // Créer des joueurs d'abord
-      await request(app.getHttpServer())
+      request(app.getHttpServer())
         .post('/api/player')
-        .send({ id: 'player1' });
-
-      await request(app.getHttpServer())
-        .post('/api/player')
-        .send({ id: 'player2' });
-
-      return request(app.getHttpServer())
-        .get('/api/ranking/events')
-        .expect(200)
-        .expect('Content-Type', /text\/event-stream/)
-        .timeout(1000); // Limite le temps d'attente
+        .send({ id: 'player1' })
+        .then(() => {
+          return request(app.getHttpServer())
+            .post('/api/player')
+            .send({ id: 'player2' });
+        })
+        .then(() => {
+          // Tester le stream SSE
+          const req = request(app.getHttpServer())
+            .get('/api/ranking/events')
+            .set('Accept', 'text/event-stream')
+            .buffer(false)
+            .parse((res, callback) => {
+              // Vérifier les headers
+              expect(res.headers['content-type']).toMatch(/text\/event-stream/);
+              expect(res.statusCode).toBe(200);
+              
+              // Fermer la connexion après avoir vérifié les headers
+              res.destroy();
+              callback(null, 'ok');
+            })
+            .end((err) => {
+              if (err && err.code !== 'ECONNRESET') {
+                done(err);
+              } else {
+                done();
+              }
+            });
+        })
+        .catch(done);
     });
   });
 
